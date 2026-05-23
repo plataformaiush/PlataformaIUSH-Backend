@@ -65,6 +65,7 @@ export const marcarContenidoComoVisto = async (id_usuario, id_contenido) => {
         return {
             message: 'Progreso actualizado correctamente',
             actualizado: true,
+            idCurso: id_curso,
             nuevoPorcentaje: updateResult.rows[0]?.porcentaje,
             cursoCompletado: updateResult.rows[0]?.completado
         };

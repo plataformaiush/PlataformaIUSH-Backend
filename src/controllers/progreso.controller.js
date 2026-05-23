@@ -1,4 +1,5 @@
 import * as ProgresoModel from '../models/progreso.model.js';
+import { generateCertificadoAutomatico } from '../services/CertificateService.js';
 
 export const completarContenido = async (req, res, next) => {
     try {
@@ -23,13 +24,20 @@ export const completarContenido = async (req, res, next) => {
 
         const resultado = await ProgresoModel.marcarContenidoComoVisto(id_usuario, idContenido);
 
+        let certificado = null;
+        if (resultado.cursoCompletado && resultado.idCurso) {
+            certificado = await generateCertificadoAutomatico(id_usuario, resultado.idCurso)
+                .catch(() => null); // no interrumpir la respuesta si ya existe el certificado
+        }
+
         return res.status(200).json({
             success: true,
             message: resultado.message,
             data: {
                 actualizado: resultado.actualizado,
                 porcentajeActual: resultado.nuevoPorcentaje,
-                completado: resultado.cursoCompletado
+                completado: resultado.cursoCompletado,
+                certificado,
             }
         });
 
