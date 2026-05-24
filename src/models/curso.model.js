@@ -3,22 +3,37 @@ import pool from '../database/db.js';
 
 // ── Queries ───────────────────────────────────────────────────
 
-export const findAll = async ({ activo, id_usuario, page = 1, limit = 10 } = {}) => {
+export const findAll = async ({ activo, id_usuario, ids_usuarios, page = 1, limit = 10 } = {}) => {
   const pageNum  = parseInt(page, 10);
-  const limitNum = parseInt(limit, 20);
+  const limitNum = parseInt(limit, 10);
   const offset   = (pageNum - 1) * limitNum;
 
   const values     = [];
   const conditions = ['c.eliminacion IS NULL'];
 
-  if (activo !== undefined) { values.push(activo);      conditions.push(`c.activo = $${values.length}`);     }
-  if (id_usuario)           { values.push(id_usuario);  conditions.push(`c.id_usuario = $${values.length}`); }
+  if (activo !== undefined) {
+    values.push(activo);
+    conditions.push(`c.activo = $${values.length}`);
+  }
+
+  // Filtro exacto por un usuario (docente filtrando sus propios cursos)
+  if (id_usuario) {
+    values.push(id_usuario);
+    conditions.push(`c.id_usuario = $${values.length}`);
+  }
+
+  // Filtro por lista de usuarios (admin filtrando cursos de sus docentes)
+  if (ids_usuarios && ids_usuarios.length > 0) {
+    values.push(ids_usuarios);
+    conditions.push(`c.id_usuario = ANY($${values.length})`);
+  }
 
   const where = conditions.join(' AND ');
 
   const dataQuery = `
     SELECT
       c.id_curso, c.id_usuario, c.titulo, c.descripcion, c.activo,
+      c.id_imagen,
       c.creacion, c.actualizacion,
       COUNT(m.id_modulo) FILTER (WHERE m.eliminacion IS NULL) AS modulos_count
     FROM curso c
@@ -51,7 +66,7 @@ export const findAll = async ({ activo, id_usuario, page = 1, limit = 10 } = {})
 
 export const findById = async (id_curso) => {
   const cursoQuery = `
-    SELECT id_curso, id_usuario, titulo, descripcion, activo, creacion, actualizacion
+    SELECT id_curso, id_usuario, titulo, descripcion, activo, id_imagen, creacion, actualizacion
     FROM curso
     WHERE id_curso = $1 AND eliminacion IS NULL
   `;
@@ -84,7 +99,8 @@ export const findById = async (id_curso) => {
 
 export const findDetalleCompleto = async (id_curso, id_usuario) => {
   const cursoQuery = `
-    SELECT c.id_curso, c.id_usuario, c.titulo, c.descripcion, c.activo, c.creacion, c.actualizacion,
+    SELECT c.id_curso, c.id_usuario, c.titulo, c.descripcion, c.activo,
+           c.id_imagen, c.creacion, c.actualizacion,
            u.nombre AS nombre_usuario
     FROM curso c
     LEFT JOIN usuario u ON c.id_usuario = u.id_usuario
@@ -172,7 +188,7 @@ export const findDetalleCompleto = async (id_curso, id_usuario) => {
   }
 
   const modulos = Array.from(modulosMap.values()).map((modulo) => {
-    const contenidosCompletados = modulo.contenidos.filter((contenido) => contenido.completado).length;
+    const contenidosCompletados = modulo.contenidos.filter((c) => c.completado).length;
     const total = modulo.contenidos.length;
     return {
       ...modulo,
@@ -195,31 +211,36 @@ export const findDetalleCompleto = async (id_curso, id_usuario) => {
     fecha_completado: null,
   };
 
-  return {
-    curso: cursoResult.rows[0],
-    progresoCurso,
-    modulos,
-    totalContenidos,
-  };
+  return { curso: cursoResult.rows[0], progresoCurso, modulos, totalContenidos };
 };
 
-export const create = async ({ id_usuario, titulo, descripcion }) => {
+// Obtiene los ids de docentes creados por un admin
+export const findDocentesDeAdmin = async (id_admin) => {
+  const result = await pool.query(
+    `SELECT id_usuario FROM usuario WHERE creado_por = $1`,
+    [id_admin]
+  );
+  return result.rows.map(r => r.id_usuario);
+};
+
+export const create = async ({ id_usuario, titulo, descripcion, id_imagen }) => {
   const query = `
-    INSERT INTO curso (id_usuario, titulo, descripcion, activo)
-    VALUES ($1, $2, $3, TRUE)
-    RETURNING id_curso, id_usuario, titulo, descripcion, activo, creacion, actualizacion
+    INSERT INTO curso (id_usuario, titulo, descripcion, activo, id_imagen)
+    VALUES ($1, $2, $3, TRUE, $4)
+    RETURNING id_curso, id_usuario, titulo, descripcion, activo, id_imagen, creacion, actualizacion
   `;
-  const result = await pool.query(query, [id_usuario, titulo, descripcion ?? null]);
+  const result = await pool.query(query, [id_usuario, titulo, descripcion ?? null, id_imagen ?? null]);
   return result.rows[0];
 };
 
-export const update = async (id_curso, { titulo, descripcion, id_usuario }) => {
+export const update = async (id_curso, { titulo, descripcion, id_usuario, id_imagen }) => {
   const fields = [];
   const values = [];
 
-  if (titulo !== undefined)     { values.push(titulo);      fields.push(`titulo = $${values.length}`);     }
-  if (descripcion !== undefined){ values.push(descripcion); fields.push(`descripcion = $${values.length}`); }
-  if (id_usuario !== undefined) { values.push(id_usuario);  fields.push(`id_usuario = $${values.length}`); }
+  if (titulo      !== undefined) { values.push(titulo);      fields.push(`titulo = $${values.length}`);      }
+  if (descripcion !== undefined) { values.push(descripcion); fields.push(`descripcion = $${values.length}`); }
+  if (id_usuario  !== undefined) { values.push(id_usuario);  fields.push(`id_usuario = $${values.length}`);  }
+  if (id_imagen   !== undefined) { values.push(id_imagen);   fields.push(`id_imagen = $${values.length}`);   }
 
   if (fields.length === 0) return null;
 
@@ -227,7 +248,7 @@ export const update = async (id_curso, { titulo, descripcion, id_usuario }) => {
   const query = `
     UPDATE curso SET ${fields.join(', ')}
     WHERE id_curso = $${values.length} AND eliminacion IS NULL
-    RETURNING id_curso, id_usuario, titulo, descripcion, activo, creacion, actualizacion
+    RETURNING id_curso, id_usuario, titulo, descripcion, activo, id_imagen, creacion, actualizacion
   `;
   const result = await pool.query(query, values);
   return result.rows[0] ?? null;
