@@ -1,6 +1,40 @@
 import * as ProgresoModel from '../models/progreso.model.js';
 import { generateCertificadoAutomatico } from '../services/CertificateService.js';
 
+export const sincronizarProgreso = async (req, res, next) => {
+    try {
+        const { id_usuario, id_curso } = req.body;
+
+        if (!id_usuario || !id_curso) {
+            return res.status(400).json({
+                success: false,
+                message: 'id_usuario e id_curso son requeridos.',
+            });
+        }
+
+        const resultado = await ProgresoModel.sincronizarProgresoCurso(id_usuario, id_curso);
+
+        let certificado = null;
+        if (resultado.completado && resultado.idCurso) {
+            certificado = await generateCertificadoAutomatico(id_usuario, resultado.idCurso)
+                .catch(() => null);
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Progreso sincronizado correctamente.',
+            data: {
+                porcentaje: resultado.porcentaje,
+                completado: resultado.completado,
+                certificado,
+            },
+        });
+    } catch (error) {
+        console.error('Error al sincronizar progreso:', error);
+        next(error);
+    }
+};
+
 export const completarContenido = async (req, res, next) => {
     try {
         const { idContenido } = req.params;

@@ -98,7 +98,7 @@ export const remove = async (id_inscripcion) => {
 
 export const findCursosInscritosPorUsuario = async (id_usuario) => {
   const query = `
-    SELECT 
+    SELECT
       i.id_inscripcion,
       i.fecha_inicio AS inscripcion_fecha_inicio,
       i.fecha_finalizacion AS inscripcion_fecha_finalizacion,
@@ -108,17 +108,38 @@ export const findCursosInscritosPorUsuario = async (id_usuario) => {
       c.descripcion,
       c.activo AS curso_activo,
       c.creacion AS curso_creacion,
-      -- Traemos el progreso si existe, si no, devolvemos 0/false
-      COALESCE(p.porcentaje, 0) AS porcentaje_progreso,
-      COALESCE(p.contenidos_completados, 0) AS contenidos_completados,
-      COALESCE(p.total_contenidos, 0) AS modulos_total,
-      COALESCE(p.completado, false) AS completado,
-      COALESCE(p.aprobado, false) AS aprobado
+      -- Usa progreso_curso si existe; si no, calcula en tiempo real desde progreso_estudiante
+      COALESCE(
+        p.porcentaje,
+        CASE WHEN ct.total > 0
+          THEN LEAST(ROUND((COALESCE(pe.completados, 0)::numeric / ct.total) * 100, 2), 100)
+          ELSE 0
+        END
+      ) AS porcentaje_progreso,
+      COALESCE(p.contenidos_completados, COALESCE(pe.completados, 0)) AS contenidos_completados,
+      COALESCE(p.total_contenidos, ct.total, 0)                       AS modulos_total,
+      COALESCE(p.completado, ct.total > 0 AND COALESCE(pe.completados, 0) >= ct.total, false) AS completado,
+      COALESCE(p.aprobado,   false)                                    AS aprobado
     FROM inscripcion i
     INNER JOIN curso c ON i.id_curso = c.id_curso
-    LEFT JOIN progreso_curso p ON p.id_curso = c.id_curso AND p.id_usuario = i.id_usuario
+    LEFT JOIN progreso_curso p
+           ON p.id_curso  = c.id_curso AND p.id_usuario = i.id_usuario
+    -- Conteo real de contenidos completados por el estudiante en este curso
+    LEFT JOIN (
+      SELECT id_usuario, id_curso, COUNT(*)::int AS completados
+        FROM progreso_estudiante
+       GROUP BY id_usuario, id_curso
+    ) pe ON pe.id_usuario = i.id_usuario AND pe.id_curso = c.id_curso
+    -- Total de contenidos del curso (excluye eliminados, incluye inactivos)
+    LEFT JOIN (
+      SELECT m.id_curso, COUNT(cn.id_contenido)::int AS total
+        FROM contenido cn
+        JOIN modulo   m  ON cn.id_modulo = m.id_modulo
+       WHERE cn.eliminacion IS NULL AND m.eliminacion IS NULL
+       GROUP BY m.id_curso
+    ) ct ON ct.id_curso = c.id_curso
     WHERE i.id_usuario = $1
-      AND c.eliminacion IS NULL -- Solo cursos que no hayan sido eliminados lógicamente
+      AND c.eliminacion IS NULL
     ORDER BY i.fecha_inicio DESC
   `;
 

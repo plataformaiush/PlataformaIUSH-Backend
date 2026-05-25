@@ -36,29 +36,50 @@ export const marcarContenidoComoVisto = async (id_usuario, id_contenido) => {
             return { message: 'El contenido ya estaba completado', actualizado: false };
         }
 
-        // 3. Como es un video nuevo visto, le sumamos 1 a progreso_curso y recalculamos
-        const updateCursoQuery = `
-      UPDATE progreso_curso
-      SET 
-        contenidos_completados = contenidos_completados + 1,
-        porcentaje = CASE 
-            WHEN total_contenidos > 0 THEN 
-                LEAST(ROUND(((contenidos_completados + 1)::numeric / total_contenidos) * 100, 2), 100)
-            ELSE 0 
+        // 3. Upsert progreso_curso — crea la fila si no existe (inscripciones nuevas)
+        //    y calcula porcentaje desde progreso_estudiante para evitar drift entre tablas.
+        const upsertCursoQuery = `
+      INSERT INTO progreso_curso (
+        id_usuario, id_curso,
+        contenidos_completados, total_contenidos,
+        porcentaje, completado, aprobado, fecha_inicio, fecha_completado
+      )
+      SELECT
+        $1, $2,
+        pe.completados,
+        ct.total,
+        CASE WHEN ct.total > 0
+          THEN LEAST(ROUND((pe.completados::numeric / ct.total) * 100, 2), 100)
+          ELSE 0
         END,
-        completado = CASE 
-            WHEN (contenidos_completados + 1) >= total_contenidos THEN true 
-            ELSE false 
-        END,
-        fecha_completado = CASE 
-            WHEN (contenidos_completados + 1) >= total_contenidos THEN NOW() 
-            ELSE NULL 
-        END
-      WHERE id_usuario = $1 AND id_curso = $2
+        ct.total > 0 AND pe.completados >= ct.total,
+        false,
+        NOW(),
+        CASE WHEN ct.total > 0 AND pe.completados >= ct.total THEN NOW() ELSE NULL END
+      FROM
+        (SELECT COUNT(*)::int AS completados
+           FROM progreso_estudiante
+          WHERE id_usuario = $1 AND id_curso = $2) AS pe,
+        (SELECT COUNT(*)::int AS total
+           FROM contenido c
+           JOIN modulo m ON c.id_modulo = m.id_modulo
+          WHERE m.id_curso = $2 AND c.eliminacion IS NULL AND m.eliminacion IS NULL) AS ct
+      ON CONFLICT (id_usuario, id_curso) DO UPDATE SET
+        contenidos_completados = EXCLUDED.contenidos_completados,
+        total_contenidos       = EXCLUDED.total_contenidos,
+        porcentaje             = EXCLUDED.porcentaje,
+        completado             = EXCLUDED.completado,
+        fecha_completado       = CASE
+                                   WHEN EXCLUDED.completado AND progreso_curso.fecha_completado IS NULL
+                                     THEN NOW()
+                                   WHEN NOT EXCLUDED.completado
+                                     THEN NULL
+                                   ELSE progreso_curso.fecha_completado
+                                 END
       RETURNING porcentaje, completado
     `;
 
-        const updateResult = await client.query(updateCursoQuery, [id_usuario, id_curso]);
+        const updateResult = await client.query(upsertCursoQuery, [id_usuario, id_curso]);
 
         await client.query('COMMIT');
 
@@ -70,6 +91,68 @@ export const marcarContenidoComoVisto = async (id_usuario, id_contenido) => {
             cursoCompletado: updateResult.rows[0]?.completado
         };
 
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+
+export const sincronizarProgresoCurso = async (id_usuario, id_curso) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const upsertQuery = `
+      INSERT INTO progreso_curso (
+        id_usuario, id_curso,
+        contenidos_completados, total_contenidos,
+        porcentaje, completado, aprobado, fecha_inicio, fecha_completado
+      )
+      SELECT
+        $1, $2,
+        pe.completados,
+        ct.total,
+        CASE WHEN ct.total > 0
+          THEN LEAST(ROUND((pe.completados::numeric / ct.total) * 100, 2), 100)
+          ELSE 0
+        END,
+        ct.total > 0 AND pe.completados >= ct.total,
+        false,
+        NOW(),
+        CASE WHEN ct.total > 0 AND pe.completados >= ct.total THEN NOW() ELSE NULL END
+      FROM
+        (SELECT COUNT(*)::int AS completados
+           FROM progreso_estudiante
+          WHERE id_usuario = $1 AND id_curso = $2) AS pe,
+        (SELECT COUNT(*)::int AS total
+           FROM contenido c
+           JOIN modulo m ON c.id_modulo = m.id_modulo
+          WHERE m.id_curso = $2 AND c.eliminacion IS NULL AND m.eliminacion IS NULL) AS ct
+      ON CONFLICT (id_usuario, id_curso) DO UPDATE SET
+        contenidos_completados = EXCLUDED.contenidos_completados,
+        total_contenidos       = EXCLUDED.total_contenidos,
+        porcentaje             = EXCLUDED.porcentaje,
+        completado             = EXCLUDED.completado,
+        fecha_completado       = CASE
+                                   WHEN EXCLUDED.completado AND progreso_curso.fecha_completado IS NULL
+                                     THEN NOW()
+                                   WHEN NOT EXCLUDED.completado
+                                     THEN NULL
+                                   ELSE progreso_curso.fecha_completado
+                                 END
+      RETURNING porcentaje, completado
+    `;
+
+        const result = await client.query(upsertQuery, [id_usuario, id_curso]);
+        await client.query('COMMIT');
+
+        return {
+            idCurso: id_curso,
+            porcentaje: result.rows[0]?.porcentaje,
+            completado: result.rows[0]?.completado ?? false,
+        };
     } catch (error) {
         await client.query('ROLLBACK');
         throw error;

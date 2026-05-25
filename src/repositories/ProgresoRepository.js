@@ -41,7 +41,7 @@ export const contarContenidos = async (idUsuario, idCurso) => {
     `SELECT COUNT(c.id_contenido)::int AS total
      FROM contenido c
      JOIN modulo m ON c.id_modulo = m.id_modulo
-     WHERE m.id_curso = $1 AND c.activo = true AND m.activo = true`,
+     WHERE m.id_curso = $1 AND c.eliminacion IS NULL AND m.eliminacion IS NULL`,
     [idCurso]
   );
   const completados = await query(
@@ -50,7 +50,7 @@ export const contarContenidos = async (idUsuario, idCurso) => {
      JOIN contenido c ON pe.id_contenido = c.id_contenido
      JOIN modulo    m ON c.id_modulo     = m.id_modulo
      WHERE pe.id_usuario = $1 AND m.id_curso = $2 AND pe.completado = true
-       AND c.activo = true AND m.activo = true`,
+       AND c.eliminacion IS NULL AND m.eliminacion IS NULL`,
     [idUsuario, idCurso]
   );
   return {

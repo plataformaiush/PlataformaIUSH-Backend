@@ -109,6 +109,13 @@ router.get(
  *                       type: boolean
  */
 router.post(
+    '/sincronizar',
+    authenticate,
+    authorize(ROLES.ESTUDIANTE, ROLES.ADMIN, ROLES.SUPER_ADMIN),
+    ProgresoController.sincronizarProgreso
+);
+
+router.post(
     '/contenido/:idContenido/completar',
     authenticate,
     authorize(ROLES.ESTUDIANTE, ROLES.SUPER_ADMIN, ROLES.ADMIN),
