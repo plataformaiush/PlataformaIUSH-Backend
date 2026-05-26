@@ -89,11 +89,44 @@ export const update = async (id_inscripcion, { fecha_inicio, fecha_finalizacion 
 };
 
 export const remove = async (id_inscripcion) => {
-  const query = `
-    DELETE FROM inscripcion WHERE id_inscripcion = $1 RETURNING id_inscripcion
-  `;
-  const result = await pool.query(query, [id_inscripcion]);
-  return result.rows[0] ?? null;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const ins = await client.query(
+      `SELECT id_usuario, id_curso FROM inscripcion WHERE id_inscripcion = $1`,
+      [id_inscripcion]
+    );
+    if (ins.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    const { id_usuario, id_curso } = ins.rows[0];
+
+    await client.query(
+      `DELETE FROM progreso_estudiante WHERE id_usuario = $1 AND id_curso = $2`,
+      [id_usuario, id_curso]
+    );
+
+    await client.query(
+      `DELETE FROM progreso_curso WHERE id_usuario = $1 AND id_curso = $2`,
+      [id_usuario, id_curso]
+    );
+
+    const result = await client.query(
+      `DELETE FROM inscripcion WHERE id_inscripcion = $1 RETURNING id_inscripcion`,
+      [id_inscripcion]
+    );
+
+    await client.query('COMMIT');
+    return result.rows[0] ?? null;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 export const findCursosInscritosPorUsuario = async (id_usuario) => {
