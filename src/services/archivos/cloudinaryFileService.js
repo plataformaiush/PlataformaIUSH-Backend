@@ -8,13 +8,15 @@ class CloudinaryFileService {
     // Retorna objeto compatible con DocumentoModel.fromStat()
     // ----------------------------------------------------------------
     async subirArchivo({ nombre, mimeType, buffer, carpeta = 'documentos' }) {
-        const publicId = `plataformaiush/${carpeta}/${Date.now()}_${this._nombreBase(nombre)}`;
+        const publicId     = `plataformaiush/${carpeta}/${Date.now()}_${this._nombreBase(nombre)}`;
+        const resourceType = this._resolverResourceType(mimeType);
 
         const result = await new Promise((resolve, reject) => {
             const uploadStream = cloudinary.uploader.upload_stream(
                 {
                     public_id    : publicId,
-                    resource_type: 'auto',
+                    resource_type: resourceType,
+                    access_mode  : 'public',
                     overwrite    : false,
                 },
                 (error, result) => {
@@ -41,9 +43,8 @@ class CloudinaryFileService {
     // ELIMINAR por public_id o secure_url
     // ----------------------------------------------------------------
     async eliminarArchivo(fileId) {
-        const publicId = this._publicIdDesdeUrl(fileId);
-        await cloudinary.uploader.destroy(publicId, { resource_type: 'raw',   invalidate: true }).catch(() => null);
-        await cloudinary.uploader.destroy(publicId, { resource_type: 'image', invalidate: true }).catch(() => null);
+        const { publicId, resourceType } = this._publicIdDesdeUrl(fileId);
+        await cloudinary.uploader.destroy(publicId, { resource_type: resourceType, invalidate: true });
     }
 
     // ----------------------------------------------------------------
@@ -57,6 +58,12 @@ class CloudinaryFileService {
     // ----------------------------------------------------------------
     // Helpers privados
     // ----------------------------------------------------------------
+    // Imágenes → 'image', todo lo demás (PDF, DOCX, TXT, ZIP…) → 'raw'
+    _resolverResourceType(mimeType) {
+        if (mimeType && mimeType.startsWith('image/')) return 'image';
+        return 'raw';
+    }
+
     _nombreBase(nombre) {
         return nombre
             .replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -64,16 +71,17 @@ class CloudinaryFileService {
     }
 
     _publicIdDesdeUrl(fileId) {
-        if (!fileId.startsWith('https://')) return fileId;
-        // https://res.cloudinary.com/<cloud>/image/upload/v123/plataformaiush/documentos/file.pdf
-        // → plataformaiush/documentos/file  (sin extensión para raw, con extensión para image)
-        const url  = new URL(fileId);
-        const partes = url.pathname.split('/upload/');
-        if (partes.length < 2) return fileId;
-        const conVersion = partes[1]; // "v1234/plataformaiush/documentos/file.pdf"
-        const sinVersion = conVersion.replace(/^v\d+\//, '');
-        // Quitar extensión para Cloudinary destroy
-        return sinVersion.replace(/\.[^/.]+$/, '');
+        if (!fileId.startsWith('https://')) return { publicId: fileId, resourceType: 'raw' };
+        // https://res.cloudinary.com/<cloud>/{image|raw}/upload/v123/plataformaiush/...
+        const url          = new URL(fileId);
+        const segmentos    = url.pathname.split('/');
+        // segmentos[2] es el resource_type: "image" o "raw"
+        const resourceType = segmentos[2] === 'image' ? 'image' : 'raw';
+        const partes       = url.pathname.split('/upload/');
+        if (partes.length < 2) return { publicId: fileId, resourceType };
+        const sinVersion   = partes[1].replace(/^v\d+\//, '');
+        const publicId     = sinVersion.replace(/\.[^/.]+$/, '');
+        return { publicId, resourceType };
     }
 
     _urlDesdePublicId(publicId) {
