@@ -8,7 +8,7 @@ const __dirname   = path.dirname(__filename);
 
 const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 const CARPETAS    = ['documentos', 'imagenes'];
-const URL_PUBLICA = 'http://localhost:3000/src/';
+const URL_PUBLICA = `${process.env.BASE_URL || 'http://localhost:3000'}/src/`;
 
 class LocalFileService {
     constructor() {

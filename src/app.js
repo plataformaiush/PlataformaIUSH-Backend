@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import swaggerUi from 'swagger-ui-express';
 import swaggerSpec from './config/swagger.js';
 import authRoutes from './routes/authRoutes.js';
@@ -21,11 +23,16 @@ import inscripcionRoutes from './routes/inscripcion.routes.js';
 import adminDashboardRoutes from './routes/adminDashboardRoutes.js';
 import { startViewRefreshScheduler, stopViewRefreshScheduler } from './utils/viewRefreshScheduler.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+app.use('/src/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get('/api-docs.json', (_req, res) => {
   res.setHeader('Content-Type', 'application/json');

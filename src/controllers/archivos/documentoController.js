@@ -4,8 +4,7 @@ import localFileService from '../../services/archivos/localFileService.js';
 import MaestroDocumento from '../../repositories/MaestroDocumento.js';
 import TipoDocumento from '../../repositories/TipoDocumento.js';
 
-// Debe coincidir con URL_PUBLICA en localFileService.js
-const URL_PUBLICA = 'http://localhost:3000/src/';
+const URL_PUBLICA = `${process.env.BASE_URL || 'http://localhost:3000'}/src/`;
 
 const buildUrlPublica = (rutaDocumento) => {
     if (!rutaDocumento) return null;
