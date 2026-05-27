@@ -4,11 +4,14 @@ import localFileService from '../../services/archivos/localFileService.js';
 import MaestroDocumento from '../../repositories/MaestroDocumento.js';
 import TipoDocumento from '../../repositories/TipoDocumento.js';
 
-const URL_PUBLICA = `${process.env.BASE_URL || 'http://localhost:3000'}/src/`;
+const URL_PUBLICA_LOCAL = `${process.env.BASE_URL || 'http://localhost:3000'}/src/`;
 
+// Backward compat: registros antiguos tienen ruta local ("documentos/file.pdf"),
+// los nuevos tienen la URL segura de Cloudinary ("https://res.cloudinary.com/...")
 const buildUrlPublica = (rutaDocumento) => {
     if (!rutaDocumento) return null;
-    return `${URL_PUBLICA}uploads/${rutaDocumento}`;
+    if (rutaDocumento.startsWith('https://')) return rutaDocumento;
+    return `${URL_PUBLICA_LOCAL}uploads/${rutaDocumento}`;
 };
 
 class DocumentoController {
@@ -94,7 +97,7 @@ class DocumentoController {
             const extension     = path.extname(originalname);
             const tipoDocumento = await TipoDocumento.findByExtension(extension);
 
-            const archivoLocal = await localFileService.subirArchivo({
+            const archivo = await localFileService.subirArchivo({
                 nombre  : originalname,
                 mimeType: mimetype,
                 buffer,
@@ -105,7 +108,7 @@ class DocumentoController {
                 id_maestro_documento : randomUUID(),
                 numero_documento     : originalname,
                 id_tipo_documento    : tipoDocumento.id_tipo_documento,
-                ruta_documento       : archivoLocal.id,
+                ruta_documento       : archivo.id,
                 tamanno              : size,
                 activo               : true,
             });
@@ -116,8 +119,9 @@ class DocumentoController {
                 success: true,
                 data: {
                     ...maestroGuardado.toJSON(),
+                    urlPublica    : buildUrlPublica(archivo.id),
                     tipo_extension: tipoDocumento.nombre,
-                    archivo       : archivoLocal,
+                    archivo,
                 },
             });
 
@@ -144,7 +148,7 @@ class DocumentoController {
             try {
                 await localFileService.eliminarArchivo(documento.ruta_documento);
             } catch (fsError) {
-                console.warn('Aviso: no se pudo eliminar el archivo físico:', fsError.message);
+                console.warn('Aviso: no se pudo eliminar el archivo:', fsError.message);
             }
 
             res.json({ success: true, mensaje: 'Documento eliminado correctamente' });
